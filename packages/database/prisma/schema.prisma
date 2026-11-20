@@ -1,0 +1,687 @@
+// Montants : Int en plus petite unité monétaire (centimes). Jamais de Float pour l'argent.
+// Mono-produit aujourd'hui, multi-produits demain : tout est modélisé autour de Product/ProductVariant.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ───────────────────────── ENUMS ─────────────────────────
+
+enum Role {
+  CUSTOMER
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum TokenType {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+}
+
+enum OrderStatus {
+  PENDING_PAYMENT
+  PAID
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  EXPIRED
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  PARTIALLY_REFUNDED
+  REFUNDED
+}
+
+enum RefundStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
+enum ShipmentStatus {
+  PENDING
+  SUBMITTED
+  IN_TRANSIT
+  DELIVERED
+  FAILED
+  RETURNED
+}
+
+enum SupplierOrderStatus {
+  PENDING
+  SUBMITTED
+  CONFIRMED
+  SHIPPED
+  FAILED
+  CANCELLED
+}
+
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum CouponType {
+  PERCENTAGE
+  FIXED_AMOUNT
+  FREE_SHIPPING
+}
+
+enum EmailStatus {
+  QUEUED
+  SENT
+  FAILED
+}
+
+enum ProductStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+// ───────────────────────── UTILISATEURS ─────────────────────────
+
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique
+  passwordHash    String
+  firstName       String?
+  lastName        String?
+  phone           String?
+  role            Role      @default(CUSTOMER)
+  locale          String    @default("fr")
+  emailVerifiedAt DateTime?
+  marketingConsentAt DateTime?
+  lastLoginAt     DateTime?
+  deletedAt       DateTime? // suppression logique + anonymisation (RGPD)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  addresses     Address[]
+  refreshTokens RefreshToken[]
+  authTokens    AuthToken[]
+  carts         Cart[]
+  orders        Order[]
+  reviews       Review[]
+  wishlist      Wishlist[]
+  adminLogs     AdminLog[]
+
+  @@index([role])
+  @@index([deletedAt])
+}
+
+model RefreshToken {
+  id         String    @id @default(cuid())
+  userId     String
+  tokenHash  String    @unique // SHA-256 du token ; jamais le token en clair
+  familyId   String // rotation + détection de réutilisation
+  userAgent  String?
+  ip         String?
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@index([expiresAt])
+}
+
+model AuthToken {
+  id         String    @id @default(cuid())
+  userId     String
+  type       TokenType
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type])
+}
+
+model Address {
+  id          String   @id @default(cuid())
+  userId      String
+  label       String?
+  firstName   String
+  lastName    String
+  line1       String
+  line2       String?
+  postalCode  String
+  city        String
+  region      String?
+  countryCode String
+  phone       String
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ───────────────────────── CATALOGUE ─────────────────────────
+
+model Category {
+  id        String   @id @default(cuid())
+  slug      String   @unique
+  name      String
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  products Product[]
+}
+
+model Product {
+  id          String        @id @default(cuid())
+  slug        String        @unique
+  status      ProductStatus @default(DRAFT)
+  isPrimary   Boolean       @default(false) // le produit "vedette" de la boutique mono-produit
+  categoryId  String?
+  brand       String?
+  videoUrl    String?
+  specs       Json? // caractéristiques techniques structurées
+  seoTitle    String?
+  seoDescription String?
+  isDemo      Boolean       @default(false) // données de démonstration explicitement marquées
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  category     Category?            @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  translations ProductTranslation[]
+  variants     ProductVariant[]
+  images       ProductImage[]
+  reviews      Review[]
+  wishlist     Wishlist[]
+  supplierLinks SupplierProduct[]
+
+  @@index([status])
+  @@index([isPrimary])
+}
+
+model ProductTranslation {
+  id          String  @id @default(cuid())
+  productId   String
+  locale      String
+  name        String
+  tagline     String?
+  summary     String?
+  description String // paragraphes séparés par une ligne vide
+  steps       Json? // tableau de { title, text }
+  benefits    Json? // tableau de { title, text }
+  usageTips   String?
+  careTips    String?
+  faq         Json? // tableau de { q, a }
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, locale])
+}
+
+model ProductVariant {
+  id          String   @id @default(cuid())
+  productId   String
+  sku         String   @unique
+  name        String // ex. "Noir / M"
+  options     Json // { color: "Noir", size: "M" }
+  weightGrams Int?
+  isActive    Boolean  @default(true)
+  position    Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  product       Product               @relation(fields: [productId], references: [id], onDelete: Cascade)
+  prices        VariantPrice[]
+  inventory     Inventory?
+  imageLinks    ProductImage[]
+  cartItems     CartItem[]
+  orderItems    OrderItem[]
+  supplierLinks SupplierProduct[]
+
+  @@index([productId])
+}
+
+/// Prix de référence par devise (pas de conversion automatique arbitraire).
+model VariantPrice {
+  id             String   @id @default(cuid())
+  variantId      String
+  currency       String
+  amount         Int // prix de vente en centimes
+  compareAtAmount Int? // ancien prix : à n'utiliser que pour une promotion réelle
+  costAmount     Int? // coût fournisseur, jamais exposé publiquement
+  updatedAt      DateTime @updatedAt
+
+  variant ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@unique([variantId, currency])
+}
+
+model ProductImage {
+  id        String   @id @default(cuid())
+  productId String
+  variantId String?
+  url       String
+  publicId  String? // identifiant Cloudinary
+  alt       String?
+  width     Int?
+  height    Int?
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  product Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+
+  @@index([productId, position])
+}
+
+/// Stock concurrent : réservation atomique via UPDATE conditionnel
+/// (WHERE onHand - reserved >= qty). Voir docs/ARCHITECTURE.md.
+model Inventory {
+  id           String   @id @default(cuid())
+  variantId    String   @unique
+  onHand       Int      @default(0)
+  reserved     Int      @default(0)
+  lowStockAt   Int      @default(5)
+  allowBackorder Boolean @default(false)
+  updatedAt    DateTime @updatedAt
+
+  variant ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+}
+
+// ───────────────────────── PANIER ─────────────────────────
+
+model Cart {
+  id        String   @id @default(cuid())
+  userId    String?
+  sessionId String?  @unique // panier invité
+  email     String? // collecté avec consentement pour relance
+  abandonedEmailConsent Boolean @default(false)
+  abandonedEmailSentAt DateTime?
+  currency  String   @default("EUR")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user  User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+  items CartItem[]
+
+  @@index([userId])
+  @@index([updatedAt])
+}
+
+model CartItem {
+  id        String   @id @default(cuid())
+  cartId    String
+  variantId String
+  quantity  Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  cart    Cart           @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  variant ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@unique([cartId, variantId])
+}
+
+// ───────────────────────── COMMANDES ─────────────────────────
+
+model Order {
+  id            String      @id @default(cuid())
+  number        String      @unique // ex. MS-2026-000123
+  userId        String?
+  email         String
+  locale        String      @default("fr")
+  status        OrderStatus @default(PENDING_PAYMENT)
+  currency      String
+  subtotal      Int
+  discountTotal Int         @default(0)
+  shippingTotal Int         @default(0)
+  taxTotal      Int         @default(0)
+  total         Int
+  couponId      String?
+  shippingAddress Json // snapshot
+  billingAddress  Json // snapshot
+  lookupTokenHash String? // suivi invité sécurisé
+  stockReleasedAt DateTime?
+  invoiceNumber String?     @unique
+  paidAt        DateTime?
+  cancelledAt   DateTime?
+  expiresAt     DateTime? // expiration de la réservation de stock
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  user           User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+  coupon         Coupon?         @relation(fields: [couponId], references: [id], onDelete: SetNull)
+  items          OrderItem[]
+  payments       Payment[]
+  shipments      Shipment[]
+  supplierOrders SupplierOrder[]
+  couponUsage    CouponUsage[]
+  reviews        Review[]
+  emailLogs      EmailLog[]
+
+  @@index([userId])
+  @@index([email])
+  @@index([status, createdAt])
+}
+
+model OrderItem {
+  id          String @id @default(cuid())
+  orderId     String
+  variantId   String?
+  // Snapshots : l'historique de commande ne doit pas changer si le catalogue change.
+  productName String
+  variantName String
+  sku         String
+  imageUrl    String?
+  unitAmount  Int
+  quantity    Int
+  lineTotal   Int
+
+  order   Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  variant ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+}
+
+model Payment {
+  id                   String        @id @default(cuid())
+  orderId              String
+  provider             String        @default("stripe")
+  stripeSessionId      String?       @unique
+  stripePaymentIntentId String?      @unique
+  status               PaymentStatus @default(PENDING)
+  amount               Int
+  currency             String
+  failureCode          String?
+  failureMessage       String?
+  paidAt               DateTime?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  order   Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  refunds Refund[]
+
+  @@index([orderId])
+}
+
+model Refund {
+  id             String       @id @default(cuid())
+  paymentId      String
+  stripeRefundId String?      @unique
+  amount         Int
+  reason         String?
+  status         RefundStatus @default(PENDING)
+  createdByAdminId String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+
+  @@index([paymentId])
+}
+
+// ───────────────────────── EXPÉDITION ─────────────────────────
+
+model Shipment {
+  id             String         @id @default(cuid())
+  orderId        String
+  status         ShipmentStatus @default(PENDING)
+  carrier        String?
+  trackingNumber String?
+  trackingUrl    String?
+  shippedAt      DateTime? // renseigné UNIQUEMENT sur confirmation fournisseur
+  deliveredAt    DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  order  Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  events TrackingEvent[]
+
+  @@index([orderId])
+  @@index([trackingNumber])
+}
+
+model TrackingEvent {
+  id         String   @id @default(cuid())
+  shipmentId String
+  status     String
+  description String?
+  location   String?
+  occurredAt DateTime
+  rawPayload Json?
+  createdAt  DateTime @default(now())
+
+  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  @@index([shipmentId, occurredAt])
+}
+
+// ───────────────────────── AVIS ─────────────────────────
+
+model Review {
+  id                 String       @id @default(cuid())
+  productId          String
+  userId             String?
+  orderId            String? // si renseigné ET payé => achat vérifié
+  rating             Int // 1..5 (contrainte CHECK ajoutée en SQL, voir docs)
+  title              String?
+  body               String
+  authorName         String
+  status             ReviewStatus @default(PENDING)
+  isVerifiedPurchase Boolean      @default(false) // calculé serveur, jamais fourni par le client
+  reportCount        Int          @default(0)
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  product Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user    User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  order   Order?        @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  images  ReviewImage[]
+
+  @@unique([productId, userId])
+  @@index([productId, status, createdAt])
+}
+
+model ReviewImage {
+  id       String @id @default(cuid())
+  reviewId String
+  url      String
+  publicId String?
+
+  review Review @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  @@index([reviewId])
+}
+
+model Wishlist {
+  id        String   @id @default(cuid())
+  userId    String
+  productId String
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, productId])
+}
+
+// ───────────────────────── PROMOTIONS ─────────────────────────
+
+model Coupon {
+  id             String     @id @default(cuid())
+  code           String     @unique
+  type           CouponType
+  value          Int // % (0..100) ou montant en centimes
+  currency       String? // requis pour FIXED_AMOUNT
+  minSubtotal    Int?
+  maxRedemptions Int?
+  maxPerUser     Int?
+  redeemedCount  Int        @default(0)
+  startsAt       DateTime?
+  endsAt         DateTime?
+  isActive       Boolean    @default(true)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  orders Order[]
+  usages CouponUsage[]
+}
+
+model CouponUsage {
+  id        String   @id @default(cuid())
+  couponId  String
+  orderId   String   @unique
+  email     String
+  createdAt DateTime @default(now())
+
+  coupon Coupon @relation(fields: [couponId], references: [id], onDelete: Restrict)
+  order  Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([couponId, email])
+}
+
+// ───────────────────────── COMMUNICATION ─────────────────────────
+
+model EmailLog {
+  id             String      @id @default(cuid())
+  idempotencyKey String      @unique // ex. "order-confirmation:{orderId}" => prévention des doublons
+  template       String
+  toEmail        String
+  subject        String
+  status         EmailStatus @default(QUEUED)
+  providerId     String?
+  error          String?
+  attempts       Int         @default(0)
+  orderId        String?
+  sentAt         DateTime?
+  createdAt      DateTime    @default(now())
+
+  order Order? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([toEmail])
+}
+
+model NewsletterSubscriber {
+  id             String    @id @default(cuid())
+  email          String    @unique
+  locale         String    @default("fr")
+  consentAt      DateTime // preuve de consentement
+  consentSource  String // ex. "footer-form"
+  confirmedAt    DateTime? // double opt-in
+  unsubscribedAt DateTime?
+  tokenHash      String?   @unique
+  createdAt      DateTime  @default(now())
+}
+
+// ───────────────────────── ADMIN / SYSTÈME ─────────────────────────
+
+model AdminLog {
+  id         String   @id @default(cuid())
+  adminId    String?
+  action     String // ex. "product.update"
+  entityType String
+  entityId   String?
+  metadata   Json?
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  admin User? @relation(fields: [adminId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@index([adminId, createdAt])
+}
+
+model SiteSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+/// Idempotence des webhooks (Stripe, fournisseur) : un événement n'est traité qu'une fois.
+model WebhookEvent {
+  id          String    @id @default(cuid())
+  provider    String
+  eventId     String
+  type        String
+  payload     Json
+  processedAt DateTime?
+  error       String?
+  attempts    Int       @default(0)
+  createdAt   DateTime  @default(now())
+
+  @@unique([provider, eventId])
+  @@index([provider, type])
+}
+
+// ───────────────────────── DROPSHIPPING ─────────────────────────
+
+model Supplier {
+  id        String   @id @default(cuid())
+  code      String   @unique // "cj", "aliexpress"...
+  name      String
+  isActive  Boolean  @default(true)
+  config    Json? // jamais de secrets ici : ils restent dans les variables d'environnement
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  products SupplierProduct[]
+  orders   SupplierOrder[]
+}
+
+model SupplierProduct {
+  id                String   @id @default(cuid())
+  supplierId        String
+  productId         String
+  variantId         String?
+  externalProductId String
+  externalVariantId String?
+  lastCost          Int?
+  lastStock         Int?
+  lastSyncedAt      DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  supplier Supplier        @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  product  Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant  ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+
+  @@unique([supplierId, externalProductId, externalVariantId])
+  @@index([productId])
+}
+
+model SupplierOrder {
+  id              String              @id @default(cuid())
+  orderId         String
+  supplierId      String
+  externalOrderId String?
+  status          SupplierOrderStatus @default(PENDING)
+  attempts        Int                 @default(0)
+  nextRetryAt     DateTime?
+  lastError       String?
+  requestPayload  Json?
+  responsePayload Json?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  order    Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+
+  @@unique([orderId, supplierId]) // jamais deux commandes fournisseur pour la même commande
+  @@index([status, nextRetryAt])
+}

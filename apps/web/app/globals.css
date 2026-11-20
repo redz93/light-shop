@@ -1,0 +1,114 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ───────────── TOKENS ─────────────
+   Sombre par défaut. `.light` est ajoutée par next-themes. Canaux RGB pour gérer l'opacité. */
+:root {
+  color-scheme: dark;
+  --bg: 10 10 12;
+  --surface: 19 19 23;
+  --surface-2: 28 28 34;
+  --border: 40 40 48;
+  --border-strong: 66 66 78;
+  --fg: 245 245 247;
+  --muted: 161 161 172;
+  --accent: 255 181 71; /* ambre « lumière chaude » */
+  --accent-fg: 20 14 4;
+  --accent-2: 125 211 252; /* bleu froid, usages secondaires */
+  --success: 74 222 128;
+  --warning: 250 204 21;
+  --danger: 248 113 113;
+}
+
+.light {
+  color-scheme: light;
+  --bg: 250 250 248;
+  --surface: 255 255 255;
+  --surface-2: 243 243 239;
+  --border: 226 226 220;
+  --border-strong: 190 190 182;
+  --fg: 15 15 18;
+  --muted: 92 92 102;
+  --accent: 240 148 16;
+  --accent-fg: 20 14 4;
+  --accent-2: 2 132 199;
+  --success: 22 163 74;
+  --warning: 202 138 4;
+  --danger: 220 38 38;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-bg font-sans text-fg antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  ::selection {
+    background: rgb(var(--accent) / 0.35);
+  }
+  :focus-visible {
+    outline: 2px solid rgb(var(--accent));
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  .text-display {
+    @apply font-display font-semibold;
+    font-size: clamp(2.5rem, 6vw + 0.75rem, 5rem);
+    line-height: 1.02;
+    letter-spacing: -0.035em;
+  }
+  .text-headline {
+    @apply font-display font-semibold;
+    font-size: clamp(1.875rem, 3vw + 1rem, 3rem);
+    line-height: 1.1;
+    letter-spacing: -0.025em;
+  }
+  .text-title {
+    @apply font-display text-xl font-semibold;
+    letter-spacing: -0.015em;
+  }
+  .text-lead {
+    @apply text-base text-muted sm:text-lg;
+    line-height: 1.6;
+  }
+  .text-eyebrow {
+    @apply text-xs font-medium uppercase text-accent;
+    letter-spacing: 0.16em;
+  }
+  .halo-glow {
+    background: radial-gradient(
+      closest-side,
+      rgb(var(--accent) / 0.3),
+      rgb(var(--accent) / 0.09) 55%,
+      transparent 75%
+    );
+  }
+  .shimmer-bg {
+    background-image: linear-gradient(
+      90deg,
+      rgb(var(--surface-2)),
+      rgb(var(--border)),
+      rgb(var(--surface-2))
+    );
+    background-size: 200% 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
